@@ -56,8 +56,8 @@ export function Footer() {
 
         <div className="space-y-3">
           <h4 className="font-heading text-sm font-semibold">{t("footer.contact")}</h4>
-          <p className="text-sm text-muted-foreground">hello@solarmap.ai</p>
-          <p className="text-sm text-muted-foreground">San Francisco, CA</p>
+          <p className="text-sm text-muted-foreground">workwith@solarmap.ai</p>
+          <p className="text-sm text-muted-foreground">Mumbai, Maharashtra</p>
         </div>
       </div>
 
