@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Add .env to .gitignore
+echo ".env" >> .gitignore
+echo ".env.local" >> .gitignore
+
+# Verify it was added
+Get-Content .gitignore | Select-String ".env"
