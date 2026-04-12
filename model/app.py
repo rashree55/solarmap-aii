@@ -14,11 +14,13 @@ def solar_api():
             lat=data["lat"],
             lon=data["lon"],
             roof_area=data["roof_area"],
-            budget=data["budget"],
             monthly_bill=data["monthly_bill"],
             tilt=data.get("tilt", "low_slope"),
             roof_condition=data.get("roof_condition", "good")
         )
+
+        if result is None:
+            return jsonify({"error": "Could not generate recommendation. Check your inputs."}), 400
 
         return jsonify(result)
 
