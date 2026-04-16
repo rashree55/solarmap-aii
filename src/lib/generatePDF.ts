@@ -21,6 +21,12 @@ interface AnalysisData {
   suitability_rating?: string;
   suitability_score?: number;
   suitability_advice?: string;
+  // New fields from teammate's changes
+  panel_reason?: string;
+  annual_maintenance?: number;
+  year1_gross_savings?: number;
+  year1_net_savings?: number;
+  degradation_rate?: number;
 }
 
 const BRAND_ORANGE: [number, number, number] = [245, 130, 32];
@@ -87,6 +93,17 @@ export function generatePDF(analysis: AnalysisData) {
   });
   y += 62;
 
+  // Panel Recommendation Reason
+  if (analysis.panel_reason) {
+    if (y > 220) { doc.addPage(); y = 20; }
+    y = sectionHeading(doc, "2a. Panel Selection Reason", y);
+    doc.setFontSize(10);
+    doc.setTextColor(...DARK_NAVY);
+    const reasonLines = doc.splitTextToSize(analysis.panel_reason, pageW - 40);
+    doc.text(reasonLines, 20, y);
+    y += reasonLines.length * 5 + 10;
+  }
+
   // Section 3: Financial Summary
   if (analysis.installation_cost != null) {
     if (y > 220) { doc.addPage(); y = 20; }
@@ -94,7 +111,19 @@ export function generatePDF(analysis: AnalysisData) {
     y = infoRow(doc, "Installation Cost",      `Rs. ${Math.round(analysis.installation_cost).toLocaleString()}`, y);
     y = infoRow(doc, "PM Surya Ghar Subsidy",  `Rs. ${Math.round(analysis.subsidy ?? 0).toLocaleString()}`,      y);
     y = infoRow(doc, "Net Cost After Subsidy", `Rs. ${Math.round(analysis.net_cost ?? 0).toLocaleString()}`,     y);
+    if (analysis.annual_maintenance != null) {
+      y = infoRow(doc, "Annual Maintenance",   `Rs. ${Math.round(analysis.annual_maintenance).toLocaleString()}/year`, y);
+    }
+    if (analysis.year1_gross_savings != null) {
+      y = infoRow(doc, "Year 1 Gross Savings", `Rs. ${Math.round(analysis.year1_gross_savings).toLocaleString()}`, y);
+    }
+    if (analysis.year1_net_savings != null) {
+      y = infoRow(doc, "Year 1 Net Savings",   `Rs. ${Math.round(analysis.year1_net_savings).toLocaleString()}`, y);
+    }
     y = infoRow(doc, "Payback Period",         `${analysis.payback_years} years`,                                y);
+    if (analysis.degradation_rate != null) {
+      y = infoRow(doc, "Panel Degradation",    `${(analysis.degradation_rate * 100).toFixed(1)}%/year`, y);
+    }
     y = infoRow(doc, "25-Year Net Savings",    `Rs. ${Math.round(analysis.savings_25yr ?? 0).toLocaleString()}`, y);
     y = infoRow(doc, "Bill Coverage",          `${Number(analysis.bill_coverage_pct ?? 0).toFixed(1)}%`,         y);
     y += 8;

@@ -186,6 +186,7 @@ export default function NewAnalysis() {
         monthly_bill:        parseFloat(monthlyBill),
         result:              apiData,
         panel_type:          apiData.panel_type,
+        panel_reason: apiData.panel_reason, //updated to include panel_reason in the database
         num_panels:          apiData.num_panels,
         system_capacity_kw:  apiData.system_capacity_kw,
         annual_energy_kwh:   apiData.annual_energy_kwh,

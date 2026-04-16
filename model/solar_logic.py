@@ -670,6 +670,7 @@ def solar_recommendation(lat, lon, roof_area, monthly_bill,
 
     return {
         'panel_type':         panel_type,
+        'panel_reason':       reason,
         'num_panels':         num_panels,
         'system_capacity_kw': system_capacity_kw,
         'annual_energy_kwh':  annual_energy,
