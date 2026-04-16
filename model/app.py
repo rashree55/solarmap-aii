@@ -19,6 +19,9 @@ def solar_api():
             roof_condition=data.get("roof_condition", "good")
         )
 
+        if result is None:
+            return jsonify({"error": "Could not generate recommendation. Check your inputs."}), 400
+
         return jsonify(result)
 
     except Exception as e:

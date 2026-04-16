@@ -28,4 +28,4 @@ echo ".env" >> .gitignore
 echo ".env.local" >> .gitignore
 
 # Verify it was added
-Get-Content .gitignore | Select-String ".env"
+Get-Content .gitignore | Select-String ".env"__pycache__/ 
