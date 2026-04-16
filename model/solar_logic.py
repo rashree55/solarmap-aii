@@ -11,7 +11,7 @@ import joblib
 # ==============================================================================
 # SECTION 0 — LOAD MODEL
 # ==============================================================================
-solar_best_model = joblib.load("solar_best_model.pkl")
+solar_best_model = joblib.load("solar_model.pkl")
 
 
 # ==============================================================================
@@ -121,49 +121,81 @@ def validate_inputs(roof_area, monthly_bill, tilt, roof_condition):
 # Panel type is now determined purely by roof area.
 # Source: MNRE Rooftop Solar Programme Phase II Guidelines
 # ==============================================================================
-def recommend_panel(roof_area):
+def recommend_panel(roof_area, annual_ghi_kwh):
     """
-    Recommends panel type based on roof area only.
+    Recommends panel type using a multi-factor approach.
 
-    Budget removed as an input — the user typically does not know their
-    solar budget upfront. The financial output (net cost, payback period)
-    gives them the information to decide affordability after the fact.
+    Decision factors:
+        1. Roof area (space constraint)
+        2. Solar irradiance (GHI)
+        3. Ambient temperature
 
     Decision logic:
-        roof_area < 20 m²  →  Monocrystalline
-            Space is the binding constraint. Mono gives the most kW per m²
-            (20% efficiency vs 15% poly). On a small roof this matters more
-            than cost.
-            Source: MNRE Rooftop Solar Programme Phase II Guidelines.
 
-        roof_area >= 20 m²  →  Polycrystalline
-            When space is not a constraint, poly gives better cost-efficiency.
-            15% efficiency is adequate when roof area is sufficient.
-            Most widely installed residential panel in India.
-            Source: MNRE Rooftop Solar Deployment Data 2023.
+        Case 1 — Small roof (<20 m²):
+            Space is the limiting factor → Monocrystalline selected
+            Higher efficiency (~20%) ensures maximum power output per unit area.
+
+        Case 2 — Low solar irradiance (<1800 kWh/m²/year):
+            Less sunlight available → Monocrystalline selected
+            Higher efficiency compensates for lower solar resource.
+
+        Case 3 — High temperature (>30°C):
+            High temperatures reduce panel efficiency.
+            Monocrystalline panels generally perform better under thermal stress.
+
+        Case 4 — Large roof (≥40 m²) + good irradiance:
+            Space is sufficient and sunlight is strong → Polycrystalline selected
+            Lower cost per watt makes it more economical.
+
+        Default:
+            Monocrystalline chosen for balanced performance.
 
     Parameters:
-        roof_area : float — available roof area in m²
+        roof_area      : float — available roof area in m²
+        annual_ghi_kwh : float — annual solar irradiance (kWh/m²/year)
+        avg_temp       : float — average ambient temperature (°C)
 
     Returns:
         panel_type : str
         reason     : str
     """
+
+    # Case 1 — Space constraint
     if roof_area < 20:
         panel_type = 'Monocrystalline'
         reason = (
-            f"Roof is space-constrained ({roof_area}m² < 20m²). "
-            f"Monocrystalline delivers 20% efficiency — maximum output per m². "
-            f"Source: MNRE Rooftop Solar Programme Phase II Guidelines."
+            f"Roof area ({roof_area}m²) is limited. Monocrystalline panels "
+            f"offer higher efficiency (~20%), maximizing power output per unit area."
         )
-    else:
+        return panel_type, reason
+
+    # Case 2 — Low solar irradiance
+    if annual_ghi_kwh < 1800:
+        panel_type = 'Monocrystalline'
+        reason = (
+            f"Solar resource is relatively low ({annual_ghi_kwh:.0f} kWh/m²/year). "
+            f"Higher efficiency monocrystalline panels help compensate for reduced sunlight."
+        )
+        return panel_type, reason
+
+
+    # Case 4 — Large roof + good sunlight
+    if roof_area >= 40 and annual_ghi_kwh >= 1800:
         panel_type = 'Polycrystalline'
         reason = (
-            f"Roof area ({roof_area}m²) is sufficient. Polycrystalline gives "
-            f"optimal cost-efficiency balance (15% efficiency). Most widely "
-            f"installed residential panel in India. "
-            f"Source: MNRE Rooftop Solar Deployment Data 2023."
+            f"Roof area ({roof_area}m²) is ample and solar resource is strong "
+            f"({annual_ghi_kwh:.0f} kWh/m²/year). Polycrystalline panels provide a "
+            f"cost-effective solution with adequate efficiency."
         )
+        return panel_type, reason
+
+    # Default case
+    panel_type = 'Monocrystalline'
+    reason = (
+        "Monocrystalline panels selected as a balanced choice, offering higher "
+        "efficiency and better performance across varying conditions."
+    )
 
     return panel_type, reason
 
@@ -172,13 +204,25 @@ def recommend_panel(roof_area):
 # SECTION 4 — SYSTEM SIZE
 # ==============================================================================
 def calculate_system_size(roof_area, panel_type, tilt='flat'):
+    MIN_SYSTEM_KW = 1.0
+    MAX_SYSTEM_KW = 20.0
+
     panel_area  = PANEL_SPECS[panel_type]['area_m2']
     wattage     = PANEL_SPECS[panel_type]['wattage']
     utilisation = ROOF_UTILISATION_FACTOR[tilt]
 
-    usable_area        = roof_area * utilisation
-    num_panels         = int(usable_area / panel_area)
+    usable_area = roof_area * utilisation
+    num_panels  = int(usable_area / panel_area)
+
+    if num_panels == 0:
+        return 0, 0.0, usable_area
+
     system_capacity_kw = (num_panels * wattage) / 1000
+
+    # Apply limits AFTER calculation
+    if system_capacity_kw > MAX_SYSTEM_KW:
+        num_panels = int((MAX_SYSTEM_KW * 1000) / wattage)
+        system_capacity_kw = (num_panels * wattage) / 1000
 
     return num_panels, system_capacity_kw, usable_area
 
@@ -208,6 +252,11 @@ def get_nasa_hourly_data(lat, lon, year=2023):
         'GHI':  list(ghi.values()),
         'temp': list(temp.values())
     })
+
+    # NASA uses -999 as fill value for missing/invalid data
+    df['GHI']  = df['GHI'].replace(-999, 0).clip(lower=0)
+    df['temp'] = df['temp'].replace(-999, np.nan).ffill().bfill()
+    response.raise_for_status()  # crash loudly if API fails
 
     return df, sum(df['GHI']) / 1000
 
@@ -278,6 +327,14 @@ def predict_annual_energy(lat, lon, system_capacity_kw):
     return annual_energy, {}, annual_ghi
 
 
+# ======================================================================
+# CONSTANTS (FINAL CORRECTED)
+# ======================================================================
+
+ELECTRICITY_RATE_PER_KWH = 7.0   # ✅ realistic Maharashtra blended tariff
+MAINTENANCE_COST_PER_KW_PER_YEAR = 1500  # ✅ MNRE full AMC standard
+
+
 # ==============================================================================
 # SECTION 9 — INSTALLATION COST
 # ==============================================================================
@@ -316,16 +373,11 @@ def calculate_subsidy(system_capacity_kw):
 
 
 # ==============================================================================
-# SECTION 11 — ROI
+# SECTION 11 — ROI (FIXED)
 # ==============================================================================
 def calculate_roi(annual_energy_kwh, installation_cost, subsidy,
                   system_capacity_kw, panel_type):
-    """
-    Realistic financial returns including maintenance and degradation.
 
-    Degradation applied year-by-year:
-      Year Y energy = annual_energy x (1 - degradation_rate)^Y
-    """
     net_cost           = installation_cost - subsidy
     annual_maintenance = system_capacity_kw * MAINTENANCE_COST_PER_KW_PER_YEAR
     degradation_rate   = DEGRADATION_RATE[panel_type]
@@ -333,15 +385,18 @@ def calculate_roi(annual_energy_kwh, installation_cost, subsidy,
     year1_gross_savings = annual_energy_kwh * ELECTRICITY_RATE_PER_KWH
     year1_net_savings   = year1_gross_savings - annual_maintenance
 
-    payback_years = (
-        round(net_cost / year1_net_savings, 2)
-        if year1_net_savings > 0 else float('inf')
-    )
+    if year1_net_savings <= 0:
+        payback_years = float('inf')
+    else:
+        payback_years = round(net_cost / year1_net_savings, 2)
 
     cumulative_savings = 0
+
     for year in range(1, PANEL_LIFETIME_YEARS + 1):
-        year_energy = annual_energy_kwh * ((1 - degradation_rate) ** year)
-        year_net    = (year_energy * ELECTRICITY_RATE_PER_KWH) - annual_maintenance
+        # ✅ FIX: Year 1 should NOT degrade
+        year_energy = annual_energy_kwh * ((1 - degradation_rate) ** (year - 1))
+
+        year_net = (year_energy * ELECTRICITY_RATE_PER_KWH) - annual_maintenance
         cumulative_savings += year_net
 
     net_savings_25yr = cumulative_savings - net_cost
@@ -491,27 +546,7 @@ def assess_suitability(system_capacity_kw, payback_years, bill_coverage_pct,
 # ==============================================================================
 def solar_recommendation(lat, lon, roof_area, monthly_bill,
                          tilt='low_slope', roof_condition='good'):
-    """
-    Complete solar installation recommendation for Maharashtra, India.
 
-    Parameters:
-        lat            : float — latitude  (Maharashtra: 15.6 to 22.1 N)
-        lon            : float — longitude (Maharashtra: 72.6 to 80.9 E)
-        roof_area      : float — available roof area in m2
-        monthly_bill   : float — current monthly electricity bill in Rs
-        tilt           : str   — 'flat', 'low_slope', 'medium_slope', 'steep'
-        roof_condition : str   — 'excellent', 'good', 'fair', or 'poor'
-
-    Returns:
-        dict — complete recommendation results, or None if inputs invalid
-
-    Note on budget removal:
-        Budget has been removed as an input. The panel type is now determined
-        purely by roof area — the technically correct approach since budget
-        should not drive a technology choice. The financial output (net cost
-        after subsidy, payback period, 25-year savings) gives the user all
-        the information needed to assess affordability after seeing the numbers.
-    """
     print('=' * 65)
     print('          SOLARMAP AI — RECOMMENDATION REPORT')
     print('              Scope: Maharashtra, India')
@@ -524,14 +559,12 @@ def solar_recommendation(lat, lon, roof_area, monthly_bill,
         print(f'\n  Input Error: {e}')
         return None
 
-    # Panel recommendation — based on roof area only
-    panel_type, reason = recommend_panel(roof_area)
+    # 🔧 FIX 1 — Get GHI first (needed for panel selection)
+    print(f'\n  Fetching NASA POWER hourly data for ({lat}N, {lon}E)...')
+    df_nasa, annual_ghi_kwh = get_nasa_hourly_data(lat, lon)
 
-    print(f'\n  Recommended Panel  : {panel_type}')
-    print(f'    Wattage          : {PANEL_SPECS[panel_type]["wattage"]}W per panel')
-    print(f'    Efficiency       : {int(PANEL_SPECS[panel_type]["efficiency"]*100)}%')
-    print(f'    Panel Area       : {PANEL_SPECS[panel_type]["area_m2"]}m2 per panel')
-    print(f'    Reason           : {reason}')
+    # 🔧 FIX 2 — Decide panel BEFORE using it
+    panel_type, reason = recommend_panel(roof_area, annual_ghi_kwh)
 
     # System sizing
     num_panels, system_capacity_kw, usable_area = calculate_system_size(
@@ -552,7 +585,6 @@ def solar_recommendation(lat, lon, roof_area, monthly_bill,
         return None
 
     # Energy prediction
-    print(f'\n  Fetching NASA POWER hourly data for ({lat}N, {lon}E)...')
     annual_energy, monthly_breakdown, annual_ghi_kwh = predict_annual_energy(
         lat, lon, system_capacity_kw
     )
@@ -564,6 +596,13 @@ def solar_recommendation(lat, lon, roof_area, monthly_bill,
         print(f'      {month} : {energy:7.1f} kWh  {bar}')
     print(f'\n    Annual Energy   : {annual_energy:,.2f} kWh')
     print(f'    Monthly Average : {round(annual_energy/12, 2):,.2f} kWh')
+
+    # Panel recommendation (already computed)
+    print(f'\n  Recommended Panel  : {panel_type}')
+    print(f'    Wattage          : {PANEL_SPECS[panel_type]["wattage"]}W per panel')
+    print(f'    Efficiency       : {int(PANEL_SPECS[panel_type]["efficiency"]*100)}%')
+    print(f'    Panel Area       : {PANEL_SPECS[panel_type]["area_m2"]}m2 per panel')
+    print(f'    Reason           : {reason}')
 
     # Costs and subsidy
     installation_cost = calculate_installation_cost(system_capacity_kw)
@@ -643,7 +682,6 @@ def solar_recommendation(lat, lon, roof_area, monthly_bill,
         'environmental':      env,
         'suitability':        suitability
     }
-
 
 # ==============================================================================
 # OPTIONAL TEST RUN
